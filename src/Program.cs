@@ -1,15 +1,14 @@
 ﻿using Raylib_cs;
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using ColorSummarizer;
 using System.Text;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Numerics;
+
 
 // ======== Init ========
 
@@ -43,10 +42,14 @@ WindowWidth = Math.Clamp(WindowWidth, 200, 4000);
 WindowHeight = Math.Clamp(WindowHeight, 200, 4000);
 
 Texture2D CurrentTexture = default;
-string Message = "Drag and drop png file into window";
+string ErrorMessage = "";
 int GlobalFrame = 0;
 int AlertFrame = int.MinValue;
-AnalysisResult CurrentResult = default;
+Color[] RequiringColors = null;
+int RequiringCountDown = 0;
+AccumulateResult CurrentAccumulateResult = default;
+GatheringResult CurrentGatheringResult = default;
+bool HasResult = false;
 
 // Init Raylib
 Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
@@ -70,8 +73,6 @@ if (stream != null) {
 
 // ======== Running ========
 
-
-
 while (!Raylib.WindowShouldClose()) {
 
 	if (GlobalFrame < AlertFrame + 24) {
@@ -88,21 +89,24 @@ while (!Raylib.WindowShouldClose()) {
 		foreach (var path in Raylib.GetDroppedFiles()) {
 			string ext = Util.GetExtensionWithDot(path);
 			if (ext != ".png") continue;
+
 			// Reset
-			Message = "";
+			ErrorMessage = "";
+			HasResult = false;
 			if (Raylib.IsTextureReady(CurrentTexture)) {
 				Raylib.UnloadTexture(CurrentTexture);
 			}
+
 			// Load Image
 			var img = Raylib.LoadImage(path);
 			if (!Raylib.IsImageReady(img)) {
-				Message = "Fail to load image data";
+				ErrorMessage = $"Fail to load image data for \"{Util.GetNameWithoutExtension(path)}\"";
 				goto _ALERT_;
 			}
 			CurrentTexture = Raylib.LoadTexture(path);
 			int len = img.Width * img.Height;
 			if (len <= 0) {
-				Message = "Image is empty";
+				ErrorMessage = $"Image \"{Util.GetNameWithoutExtension(path)}\" is empty";
 				goto _ALERT_;
 			}
 
@@ -114,21 +118,21 @@ while (!Raylib.WindowShouldClose()) {
 					colors[i] = pColors[i];
 				}
 				Raylib.UnloadImageColors(pColors);
-
-
-
 			}
 
 			// Analysis
-			CurrentResult = Analysis(colors);
+			RequiringColors = colors;
+			RequiringCountDown = 5;
 
 			// Finish
 			Raylib.UnloadImage(img);
+			HasResult = true;
 			break;
 
 			// Alert
 			_ALERT_:;
 			AlertFrame = GlobalFrame;
+			HasResult = true;
 			continue;
 		}
 	}
@@ -136,11 +140,63 @@ while (!Raylib.WindowShouldClose()) {
 	// UI
 	if (!Raylib.IsWindowMinimized()) {
 
-		// Hint
-		if (!string.IsNullOrEmpty(Message)) {
-			Raylib.DrawText(Message, 42, 42, 64, Color.RayWhite);
+		// Requiring
+		if (RequiringColors != null) {
+
+			// Loading Hint
+			Raylib.DrawText("Analyzing...", 42, 42, 64, Color.RayWhite);
+
+			// Analysis
+			if (RequiringCountDown > 0) {
+				RequiringCountDown--;
+				goto _END_;
+			} else {
+				CurrentAccumulateResult = new AccumulateResult(RequiringColors);
+				CurrentGatheringResult = new GatheringResult(RequiringColors);
+				RequiringColors = null;
+				HasResult = true;
+			}
+		}
+
+		// Drop Hint
+		if (!HasResult) {
+			Raylib.DrawText("Drag and drop png file into window", 42, 42, 64, Color.RayWhite);
 			goto _END_;
 		}
+
+		// Error Hint
+		if (!string.IsNullOrEmpty(ErrorMessage)) {
+			Raylib.DrawText(ErrorMessage, 42, 42, 64, new Color(255, 64, 0, 255));
+			goto _END_;
+		}
+
+		// Draw Accumulate Textures
+		int screenW = Raylib.GetRenderWidth();
+		int screenH = Raylib.GetRenderHeight();
+		int textureLen = CurrentAccumulateResult.Textures.Length;
+		int uiL = 0;
+		int uiT = 0;
+		int uiW = screenW / 6;
+		int uiH = (int)MathF.Ceiling(screenH / (float)textureLen);
+		for (int i = 0; i < textureLen; i++) {
+			var texture = CurrentAccumulateResult.Textures[i];
+			if (!Raylib.IsTextureReady(texture)) continue;
+			int uiIndex = textureLen - i - 1;
+			Raylib.DrawTexturePro(
+				texture,
+				source: new Rectangle(0, 0, 360, 101),
+				dest: new Rectangle(
+					uiL,
+					uiT + uiH * (uiIndex % textureLen),
+					uiW, uiH
+				),
+				origin: new Vector2(),
+				0f, Color.White
+			);
+
+		}
+
+		// Draw Gathering Textures 
 
 
 
@@ -158,6 +214,7 @@ while (!Raylib.WindowShouldClose()) {
 
 // ======== Quit ========
 
+
 // Save Config
 {
 	var builder = new StringBuilder();
@@ -171,119 +228,8 @@ while (!Raylib.WindowShouldClose()) {
 	Util.TextToFile(builder.ToString(), ConfigPath, Encoding.UTF8);
 }
 
+
 // Close Windows Terminal on Quit
 #if DEBUG
 Process.GetProcessesByName("WindowsTerminal").ToList().ForEach(item => item.CloseMainWindow());
 #endif
-
-
-// ======== Func ========
-static AnalysisResult Analysis (Color[] colors) {
-
-	const int ACC_LEN = 32;
-	const float MIN_S = 0.1f;
-	const float MIN_V = 0.1f;
-	const float MAX_V = 0.9f;
-
-	int len = colors.Length;
-	var result = new AnalysisResult(ACC_LEN);
-	var colSpan = new ReadOnlySpan<Color>(colors);
-
-	// Get HSV
-	var hsvArr = new (float h, float s, float v)[len];
-	var hsvSpan = hsvArr.AsSpan();
-	for (int i = 0; i < len; i++) {
-		var col = colSpan[i];
-		var (h, s, v) = Raylib.ColorToHSV(col);
-		h /= 360f;
-		hsvSpan[i] = (h, s, v);
-	}
-	hsvSpan.Sort((a, b) => a.h.CompareTo(b.h));
-
-	// Accumulation
-	for (int i = 0; i < len; i++) {
-		var (h, s, v) = hsvSpan[i];
-		if (s < MIN_S || v < MIN_V || v > MAX_V) continue;
-		int accIndex = Math.Clamp((int)MathF.Round(h * ACC_LEN), 0, ACC_LEN - 1);
-		var acc = result.Accumulations[accIndex];
-		acc.HSVs.Add(hsvSpan[i]);
-	}
-	for (int i = 0; i < ACC_LEN; i++) {
-		result.Accumulations[i].HSVs.Sort((a, b) => a.v.CompareTo(b.v));
-	}
-
-	// Draw Result Texture
-
-
-
-
-	return result;
-}
-
-static unsafe byte[] TextureToPngBytes (Texture2D texture) {
-	var fileType = Marshal.StringToHGlobalAnsi(".png");
-	int fileSize = 0;
-	char* result = Raylib.ExportImageToMemory(
-		Raylib.LoadImageFromTexture(texture),
-		(sbyte*)fileType.ToPointer(),
-		&fileSize
-	);
-	if (fileSize == 0) return [];
-	var resultBytes = new byte[fileSize];
-	Marshal.Copy((nint)result, resultBytes, 0, fileSize);
-	Marshal.FreeHGlobal((nint)result);
-	Marshal.FreeHGlobal(fileType);
-	return resultBytes;
-}
-
-static unsafe Texture2D? GetTextureFromPixelsLogic (Color[] pixels, int width, int height) {
-	int len = width * height;
-	if (len == 0) return null;
-	Texture2D textureResult;
-	var image = new Image() {
-		Format = PixelFormat.UncompressedR8G8B8A8,
-		Width = width,
-		Height = height,
-		Mipmaps = 1,
-	};
-	if (pixels != null && pixels.Length == len) {
-		var bytes = new byte[pixels.Length * 4];
-		int index = 0;
-		for (int y = 0; y < height; y++) {
-			for (int x = 0; x < width; x++) {
-				int i = (height - y - 1) * width + x;
-				var p = pixels[i];
-				bytes[index * 4 + 0] = p.R;
-				bytes[index * 4 + 1] = p.G;
-				bytes[index * 4 + 2] = p.B;
-				bytes[index * 4 + 3] = p.A;
-				index++;
-			}
-		}
-		fixed (void* data = bytes) {
-			image.Data = data;
-			textureResult = Raylib.LoadTextureFromImage(image);
-		}
-	} else {
-		textureResult = Raylib.LoadTextureFromImage(image);
-	}
-	Raylib.SetTextureFilter(textureResult, TextureFilter.Point);
-	return textureResult;
-
-}
-
-
-// ======== SUB ========
-public struct Accumulation () {
-	public List<(float h, float s, float v)> HSVs = new(8);
-}
-
-public struct AnalysisResult {
-	public Accumulation[] Accumulations;
-	public AnalysisResult (int accumulationLen) {
-		Accumulations = new Accumulation[accumulationLen];
-		for (int i = 0; i < accumulationLen; i++) {
-			Accumulations[i] = new();
-		}
-	}
-}

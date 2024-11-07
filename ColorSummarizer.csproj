@@ -62,6 +62,7 @@
 		<None Remove=".editorconfig" />
 		<None Remove=".gitattributes" />
 		<None Remove=".gitignore" />
+		<None Remove="desktop.ini" />
 		<None Remove="Icon.ico" />
 		<None Remove="Icon.png" />
 		<None Remove="LICENSE" />

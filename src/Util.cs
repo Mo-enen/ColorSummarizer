@@ -2,11 +2,16 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
+using Raylib_cs;
 
 namespace ColorSummarizer;
 
 static class Util {
+
+	private const MethodImplOptions INLINE = MethodImplOptions.AggressiveInlining;
 
 
 	// Extension
@@ -15,6 +20,19 @@ static class Util {
 		y = v.Y;
 		z = v.Z;
 	}
+	public static void Deconstruct (this Color c, out byte r, out byte g, out byte b, out byte a) {
+		r = c.R;
+		g = c.G;
+		b = c.B;
+		a = c.A;
+	}
+
+
+	[MethodImpl(INLINE)]
+	public static int UMod (this int value, int step) =>
+		value > 0 || value % step == 0 ?
+		value % step :
+		value % step + step;
 
 
 	// File
@@ -178,6 +196,78 @@ static class Util {
 		}
 
 		return name;
+	}
+
+
+	// Texture
+	public static unsafe byte[] TextureToPngBytes (Texture2D texture) {
+		var fileType = Marshal.StringToHGlobalAnsi(".png");
+		int fileSize = 0;
+		char* result = Raylib.ExportImageToMemory(
+			Raylib.LoadImageFromTexture(texture),
+			(sbyte*)fileType.ToPointer(),
+			&fileSize
+		);
+		if (fileSize == 0) return [];
+		var resultBytes = new byte[fileSize];
+		Marshal.Copy((nint)result, resultBytes, 0, fileSize);
+		Marshal.FreeHGlobal((nint)result);
+		Marshal.FreeHGlobal(fileType);
+		return resultBytes;
+	}
+
+
+	public static unsafe Texture2D? GetTextureFromPixelsLogic (Color[] pixels, int width, int height) {
+		int len = width * height;
+		if (len == 0) return null;
+		Texture2D textureResult;
+		var image = new Image() {
+			Format = PixelFormat.UncompressedR8G8B8A8,
+			Width = width,
+			Height = height,
+			Mipmaps = 1,
+		};
+		if (pixels != null && pixels.Length == len) {
+			var bytes = new byte[pixels.Length * 4];
+			int index = 0;
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					int i = (height - y - 1) * width + x;
+					var p = pixels[i];
+					bytes[index * 4 + 0] = p.R;
+					bytes[index * 4 + 1] = p.G;
+					bytes[index * 4 + 2] = p.B;
+					bytes[index * 4 + 3] = p.A;
+					index++;
+				}
+			}
+			fixed (void* data = bytes) {
+				image.Data = data;
+				textureResult = Raylib.LoadTextureFromImage(image);
+			}
+		} else {
+			textureResult = Raylib.LoadTextureFromImage(image);
+		}
+		Raylib.SetTextureFilter(textureResult, TextureFilter.Point);
+		return textureResult;
+
+	}
+
+
+	public static void FillPixelsIntoTexture (Color[] pixels, Texture2D texture) {
+		if (pixels == null) return;
+		int width = texture.Width;
+		int height = texture.Height;
+		if (pixels.Length != width * height) return;
+		int index = 0;
+		for (int y = 0; y < height / 2; y++) {
+			for (int x = 0; x < width; x++) {
+				int i = (height - y - 1) * width + x;
+				(pixels[index], pixels[i]) = (pixels[i], pixels[index]);
+				index++;
+			}
+		}
+		Raylib.UpdateTexture(texture, pixels);
 	}
 
 
