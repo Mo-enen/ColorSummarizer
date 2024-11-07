@@ -9,7 +9,7 @@ using System.Text;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
-
+using System.Numerics;
 
 // ======== Init ========
 
@@ -46,6 +46,7 @@ Texture2D CurrentTexture = default;
 string Message = "Drag and drop png file into window";
 int GlobalFrame = 0;
 int AlertFrame = int.MinValue;
+AnalysisResult CurrentResult = default;
 
 // Init Raylib
 Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
@@ -68,6 +69,7 @@ if (stream != null) {
 
 
 // ======== Running ========
+
 
 
 while (!Raylib.WindowShouldClose()) {
@@ -118,7 +120,7 @@ while (!Raylib.WindowShouldClose()) {
 			}
 
 			// Analysis
-			Analysis(colors);
+			CurrentResult = Analysis(colors);
 
 			// Finish
 			Raylib.UnloadImage(img);
@@ -176,14 +178,48 @@ Process.GetProcessesByName("WindowsTerminal").ToList().ForEach(item => item.Clos
 
 
 // ======== Func ========
-static void Analysis (Color[] colors) {
+static AnalysisResult Analysis (Color[] colors) {
 
-	//Raylib.ColorFromHSV
-	
+	const int ACC_LEN = 32;
+	const float MIN_S = 0.1f;
+	const float MIN_V = 0.1f;
+	const float MAX_V = 0.9f;
+
+	int len = colors.Length;
+	var result = new AnalysisResult(ACC_LEN);
+	var colSpan = new ReadOnlySpan<Color>(colors);
+
+	// Get HSV
+	var hsvArr = new (float h, float s, float v)[len];
+	var hsvSpan = hsvArr.AsSpan();
+	for (int i = 0; i < len; i++) {
+		var col = colSpan[i];
+		var (h, s, v) = Raylib.ColorToHSV(col);
+		h /= 360f;
+		hsvSpan[i] = (h, s, v);
+	}
+	hsvSpan.Sort((a, b) => a.h.CompareTo(b.h));
+
+	// Accumulation
+	for (int i = 0; i < len; i++) {
+		var (h, s, v) = hsvSpan[i];
+		if (s < MIN_S || v < MIN_V || v > MAX_V) continue;
+		int accIndex = Math.Clamp((int)MathF.Round(h * ACC_LEN), 0, ACC_LEN - 1);
+		var acc = result.Accumulations[accIndex];
+		acc.HSVs.Add(hsvSpan[i]);
+	}
+	for (int i = 0; i < ACC_LEN; i++) {
+		result.Accumulations[i].HSVs.Sort((a, b) => a.v.CompareTo(b.v));
+	}
+
+	// Draw Result Texture
 
 
 
+
+	return result;
 }
+
 static unsafe byte[] TextureToPngBytes (Texture2D texture) {
 	var fileType = Marshal.StringToHGlobalAnsi(".png");
 	int fileSize = 0;
@@ -199,6 +235,7 @@ static unsafe byte[] TextureToPngBytes (Texture2D texture) {
 	Marshal.FreeHGlobal(fileType);
 	return resultBytes;
 }
+
 static unsafe Texture2D? GetTextureFromPixelsLogic (Color[] pixels, int width, int height) {
 	int len = width * height;
 	if (len == 0) return null;
@@ -233,4 +270,20 @@ static unsafe Texture2D? GetTextureFromPixelsLogic (Color[] pixels, int width, i
 	Raylib.SetTextureFilter(textureResult, TextureFilter.Point);
 	return textureResult;
 
+}
+
+
+// ======== SUB ========
+public struct Accumulation () {
+	public List<(float h, float s, float v)> HSVs = new(8);
+}
+
+public struct AnalysisResult {
+	public Accumulation[] Accumulations;
+	public AnalysisResult (int accumulationLen) {
+		Accumulations = new Accumulation[accumulationLen];
+		for (int i = 0; i < accumulationLen; i++) {
+			Accumulations[i] = new();
+		}
+	}
 }

@@ -1,11 +1,21 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using System.Text;
 
 namespace ColorSummarizer;
 
 static class Util {
+
+
+	// Extension
+	public static void Deconstruct (this Vector3 v, out float x, out float y, out float z) {
+		x = v.X;
+		y = v.Y;
+		z = v.Z;
+	}
+
 
 	// File
 	public static void TextToFile (string data, string path, Encoding encoding, bool append = false) {

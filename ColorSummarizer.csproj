@@ -25,9 +25,6 @@
 		<AnalysisLevel>latest-recommended</AnalysisLevel>
 		<ApplicationIcon>Icon.ico</ApplicationIcon>
 
-		<DebugType>none</DebugType>
-
-
 
 	</PropertyGroup>
 
