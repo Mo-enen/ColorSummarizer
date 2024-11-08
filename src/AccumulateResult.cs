@@ -1,14 +1,28 @@
 ﻿using Raylib_cs;
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 
 namespace ColorSummarizer;
 
-public struct AccumulateResult {
+public readonly struct AccumulateResult {
 
-	public HSV[,,] Accumulation = new HSV[360, 101, 101]; // [h,s,v]
-	public Texture2D[] Textures = new Texture2D[12];
-	public static Color[] CachePixels = new Color[360 * 101];
+
+	public struct HSV (int h, int s, int v, bool valid = true) {
+		public bool Valid = valid;
+		public int H = h;
+		public int S = s;
+		public int V = v;
+		public readonly void Deconstruct (out int h, out int s, out int v) {
+			h = H;
+			s = S;
+			v = V;
+		}
+	}
+
+	public readonly HSV[,,] Accumulation = new HSV[360, 101, 101]; // [h,s,v]
+	public readonly Texture2D[] Textures = new Texture2D[12];
+	private static readonly Color[] CachePixels = new Color[360 * 101];
 
 	public AccumulateResult (Color[] colors) {
 
@@ -75,6 +89,31 @@ public struct AccumulateResult {
 			Util.FillPixelsIntoTexture(cachePixs, Textures[tIndex]);
 		}
 
+	}
+
+	public readonly void DrawResult (Rectangle uiRect) {
+		int textureLen = Textures.Length;
+		int uiL = 0;
+		int uiT = 0;
+		int uiW = (int)uiRect.Width;
+		int uiH = (int)MathF.Ceiling(uiRect.Height / textureLen);
+		for (int i = 0; i < textureLen; i++) {
+			var texture = Textures[i];
+			if (!Raylib.IsTextureReady(texture)) continue;
+			int uiIndex = textureLen - i - 1;
+			Raylib.DrawTexturePro(
+				texture,
+				source: new Rectangle(0, 0, texture.Width, texture.Height),
+				dest: new Rectangle(
+					uiL,
+					uiT + uiH * (uiIndex % textureLen),
+					uiW, uiH
+				),
+				origin: new Vector2(),
+				0f, Color.White
+			);
+
+		}
 	}
 
 }

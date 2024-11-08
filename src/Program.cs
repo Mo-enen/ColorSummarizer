@@ -48,8 +48,11 @@ int AlertFrame = int.MinValue;
 Color[] RequiringColors = null;
 int RequiringCountDown = 0;
 AccumulateResult CurrentAccumulateResult = default;
-GatheringResult CurrentGatheringResult = default;
+GatheringResult CurrentGatheringResultA = default;
+GatheringResult CurrentGatheringResultB = default;
 bool HasResult = false;
+bool RequireAccumulation = args.Contains(" -accumulation") || args.Contains(" -acc");
+bool RequireGathering = !args.Contains(" -no-gathering") && !args.Contains(" -ng");
 
 // Init Raylib
 Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
@@ -103,6 +106,7 @@ while (!Raylib.WindowShouldClose()) {
 				ErrorMessage = $"Fail to load image data for \"{Util.GetNameWithoutExtension(path)}\"";
 				goto _ALERT_;
 			}
+
 			CurrentTexture = Raylib.LoadTexture(path);
 			int len = img.Width * img.Height;
 			if (len <= 0) {
@@ -151,8 +155,13 @@ while (!Raylib.WindowShouldClose()) {
 				RequiringCountDown--;
 				goto _END_;
 			} else {
-				CurrentAccumulateResult = new AccumulateResult(RequiringColors);
-				CurrentGatheringResult = new GatheringResult(RequiringColors);
+				if (RequireAccumulation) {
+					CurrentAccumulateResult = new AccumulateResult(RequiringColors);
+				}
+				if (RequireGathering) {
+					CurrentGatheringResultA = new GatheringResult(RequiringColors, false);
+					CurrentGatheringResultB = new GatheringResult(RequiringColors, true);
+				}
 				RequiringColors = null;
 				HasResult = true;
 			}
@@ -170,35 +179,25 @@ while (!Raylib.WindowShouldClose()) {
 			goto _END_;
 		}
 
-		// Draw Accumulate Textures
-		int screenW = Raylib.GetRenderWidth();
-		int screenH = Raylib.GetRenderHeight();
-		int textureLen = CurrentAccumulateResult.Textures.Length;
-		int uiL = 0;
-		int uiT = 0;
-		int uiW = screenW / 6;
-		int uiH = (int)MathF.Ceiling(screenH / (float)textureLen);
-		for (int i = 0; i < textureLen; i++) {
-			var texture = CurrentAccumulateResult.Textures[i];
-			if (!Raylib.IsTextureReady(texture)) continue;
-			int uiIndex = textureLen - i - 1;
-			Raylib.DrawTexturePro(
-				texture,
-				source: new Rectangle(0, 0, 360, 101),
-				dest: new Rectangle(
-					uiL,
-					uiT + uiH * (uiIndex % textureLen),
-					uiW, uiH
-				),
-				origin: new Vector2(),
-				0f, Color.White
-			);
+		int rWidth = Raylib.GetRenderWidth();
+		int rHeight = Raylib.GetRenderHeight();
+		int uiLeft = 0;
+		int resultCount = (RequireAccumulation ? 1 : 0) + (RequireGathering ? 1 : 0);
 
+		// Draw Accumulate Textures
+		if (RequireAccumulation) {
+			int accW = rWidth / resultCount;
+			CurrentAccumulateResult.DrawResult(new Rectangle(uiLeft, 0, accW, rHeight));
+			uiLeft += accW;
 		}
 
 		// Draw Gathering Textures 
-
-
+		if (RequireGathering) {
+			int gW = rWidth / resultCount;
+			CurrentGatheringResultA.DrawResult(new Rectangle(uiLeft, 0, gW, rHeight / 2f));
+			CurrentGatheringResultB.DrawResult(new Rectangle(uiLeft, rHeight / 2f, gW, rHeight / 2f));
+			uiLeft += gW;
+		}
 
 
 
