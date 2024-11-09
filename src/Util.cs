@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
@@ -25,6 +26,21 @@ static class Util {
 		g = c.G;
 		b = c.B;
 		a = c.A;
+	}
+
+	public static Rectangle Fit (this Rectangle rect, float targetAspect, float pivotX = 0.5f, float pivotY = 0.5f) {
+		float sizeX = rect.Width;
+		float sizeY = rect.Height;
+		if (targetAspect > rect.Width / rect.Height) {
+			sizeY = sizeX / targetAspect;
+		} else {
+			sizeX = sizeY * targetAspect;
+		}
+		return new Rectangle(
+			rect.X + MathF.Abs(rect.Width - sizeX) * pivotX,
+			rect.Y + MathF.Abs(rect.Height - sizeY) * pivotY,
+			sizeX, sizeY
+		);
 	}
 
 

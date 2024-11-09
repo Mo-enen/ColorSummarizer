@@ -7,7 +7,6 @@ namespace ColorSummarizer;
 
 public readonly struct AccumulateResult {
 
-
 	public struct HSV (int h, int s, int v, bool valid = true) {
 		public bool Valid = valid;
 		public int H = h;
@@ -93,8 +92,6 @@ public readonly struct AccumulateResult {
 
 	public readonly void DrawResult (Rectangle uiRect) {
 		int textureLen = Textures.Length;
-		int uiL = 0;
-		int uiT = 0;
 		int uiW = (int)uiRect.Width;
 		int uiH = (int)MathF.Ceiling(uiRect.Height / textureLen);
 		for (int i = 0; i < textureLen; i++) {
@@ -105,8 +102,8 @@ public readonly struct AccumulateResult {
 				texture,
 				source: new Rectangle(0, 0, texture.Width, texture.Height),
 				dest: new Rectangle(
-					uiL,
-					uiT + uiH * (uiIndex % textureLen),
+					uiRect.X,
+					uiRect.Y + uiH * (uiIndex % textureLen),
 					uiW, uiH
 				),
 				origin: new Vector2(),

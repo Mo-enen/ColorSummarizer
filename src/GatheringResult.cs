@@ -11,6 +11,8 @@ public readonly struct GatheringResult {
 
 
 	// SUB
+	public enum FilterMode { All, Common, Extreme, }
+
 	public struct Pix {
 		public byte R;
 		public byte G;
@@ -49,22 +51,18 @@ public readonly struct GatheringResult {
 
 
 	// VAR
-	private static readonly Color[] CachePixels = new Color[1 * 128];
-	public readonly List<(int height, Texture2D texture)> ResultTextures = [];
-	public readonly List<HueColumn> Columns = [];
+	public readonly List<(int pixCount, Color color)> ResultColors = [];
+	private readonly int MaxResultHeight;
+	private readonly ulong TotalResultHeight;
 
 
 	// MSG
-	public GatheringResult (Color[] colors, bool forExtreme) {
+	public GatheringResult (Color[] colors, FilterMode filter) {
 
 		// Clear
-		foreach (var (_, texture) in ResultTextures) {
-			if (Raylib.IsTextureReady(texture)) {
-				Raylib.UnloadTexture(texture);
-			}
-		}
-		ResultTextures.Clear();
-		Columns.Clear();
+		MaxResultHeight = 0;
+		ResultColors.Clear();
+		var columns = new List<HueColumn>();
 
 		// Create New
 		int len = colors.Length;
@@ -72,12 +70,30 @@ public readonly struct GatheringResult {
 		var allPixs = new List<Pix>();
 
 		// Get All Pixels
-		for (int i = 0; i < len; i++) {
-			var pix = new Pix(colSpan[i]);
-			bool extreme = pix.S < 0.2f || pix.L < 0.1f || pix.L > 0.9f;
-			if (extreme != forExtreme) continue;
-			// pix.S < 0.2f || pix.V < 0.1f || pix.V > 0.9f
-			allPixs.Add(pix);
+		switch (filter) {
+			case FilterMode.All:
+				for (int i = 0; i < len; i++) {
+					allPixs.Add(new Pix(colSpan[i]));
+				}
+				break;
+			case FilterMode.Common:
+				for (int i = 0; i < len; i++) {
+					var pix = new Pix(colSpan[i]);
+					if (pix.S < 0.2f || pix.L < 0.1f || pix.L > 0.9f) {
+						continue;
+					}
+					allPixs.Add(pix);
+				}
+				break;
+			case FilterMode.Extreme:
+				for (int i = 0; i < len; i++) {
+					var pix = new Pix(colSpan[i]);
+					if (pix.S >= 0.2f && pix.L >= 0.1f && pix.L <= 0.9f) {
+						continue;
+					}
+					allPixs.Add(pix);
+				}
+				break;
 		}
 		allPixs.Sort((a, b) => a.H.CompareTo(b.H));
 
@@ -88,7 +104,7 @@ public readonly struct GatheringResult {
 		int availableRight = hueLeft > 0 ? hueLeft : allPixSpan.Length - 1;
 		int hueRight = ContinueSearch(allPixSpan, currentIndex, 1, 0, availableRight);
 		int availableLeft = hueRight;
-		FillColumn(Columns, allPixSpan, availableRight, availableLeft + allPixSpan.Length - availableRight + 1);
+		FillColumn(columns, allPixSpan, availableRight, availableLeft + allPixSpan.Length - availableRight + 1);
 		currentIndex = hueRight + 1;
 		while (true) {
 
@@ -99,12 +115,12 @@ public readonly struct GatheringResult {
 			}
 
 			// Calculate Hue Column
-			FillColumn(Columns, allPixSpan, currentIndex, hueRight - currentIndex + 1);
+			FillColumn(columns, allPixSpan, currentIndex, hueRight - currentIndex + 1);
 
 			// Next
 			currentIndex = hueRight + 1;
 		}
-		foreach (var column in Columns) {
+		foreach (var column in columns) {
 			column.Pixels.Sort((a, b) => {
 				int order = b.SteppedS.CompareTo(a.SteppedS);
 				return order != 0 ? order : a.V.CompareTo(b.V);
@@ -113,19 +129,19 @@ public readonly struct GatheringResult {
 
 		// Split Column for Stepped S
 		var newColumns = new List<HueColumn>();
-		for (int columnIndex = 0; columnIndex < Columns.Count; columnIndex++) {
-			var sourceColumn = Columns[columnIndex];
+		for (int columnIndex = 0; columnIndex < columns.Count; columnIndex++) {
+			var sourceColumn = columns[columnIndex];
 			var pSpan = CollectionsMarshal.AsSpan(sourceColumn.Pixels);
 			int pLen = pSpan.Length;
 			if (pLen == 0) continue;
-			int anchorS = pSpan[0].SteppedS;
+			var anchorPix = pSpan[0];
 			var newColumn = new HueColumn() {
 				TargetHue = sourceColumn.TargetHue,
 			};
 			for (int i = 0; i < pLen; i++) {
 				var pix = pSpan[i];
-				if (pix.SteppedS != anchorS) {
-					anchorS = pix.SteppedS;
+				if (pix.SteppedS != anchorPix.SteppedS || pix.Distance(anchorPix) > 0.06f) {
+					anchorPix = pix;
 					newColumns.Add(newColumn);
 					newColumn = new HueColumn() {
 						TargetHue = sourceColumn.TargetHue,
@@ -138,54 +154,42 @@ public readonly struct GatheringResult {
 				newColumns.Add(newColumn);
 			}
 		}
-		Columns.Clear();
-		Columns.AddRange(newColumns);
 
-		// Fill Result Texture
-		foreach (var column in Columns) {
+		// Sort Column by Count
+		newColumns.Sort((a, b) => b.Pixels.Count.CompareTo(a.Pixels.Count));
+
+		// Fill Result Colors
+		MaxResultHeight = 0;
+		TotalResultHeight = 0;
+		foreach (var column in newColumns) {
 			var pSpan = CollectionsMarshal.AsSpan(column.Pixels);
 			int pLen = pSpan.Length;
 			if (pLen == 0) continue;
-			int cacheLen = CachePixels.Length;
-			Array.Clear(CachePixels);
-			int currentY = 0;
-			int accCount = 0;
-			float sumH = 0;
-			float sumS = 0;
-			float sumV = 0;
-			var anchorPix = pSpan[0];
+			float sumR = 0f;
+			float sumG = 0f;
+			float sumB = 0f;
 			for (int i = 0; i < pLen; i++) {
-				var pix = pSpan[i];
-				if (pix.Distance(anchorPix) > 0.06f) {
-					anchorPix = pix;
-					if (accCount > 128) {
-						int drawLen = Math.Clamp(accCount / 128, 1, 8);
-						for (int _y = 0; _y < drawLen; _y++) {
-							CachePixels[currentY] = Raylib.ColorFromHSV(
-								sumH / accCount * 360f,
-								sumS / accCount,
-								sumV / accCount
-							);
-							currentY++;
-							if (currentY >= cacheLen) goto _SKIP_;
-						}
-					}
-					accCount = 0;
-					sumH = 0;
-					sumS = 0;
-					sumV = 0;
-				}
-				sumH += pix.H;
-				sumS += pix.S;
-				sumV += pix.V;
-				accCount++;
+				var _pix = pSpan[i];
+				sumR += _pix.R;
+				sumG += _pix.G;
+				sumB += _pix.B;
 			}
-			_SKIP_:;
-			var texture = Util.GetTextureFromPixelsLogic(CachePixels, 1, cacheLen);
-			if (texture.HasValue && currentY > 0) {
-				ResultTextures.Add((currentY, texture.Value));
-			}
+			ResultColors.Add((pLen, new Color(
+				(int)Math.Clamp(sumR / pLen, 0, 255),
+				(int)Math.Clamp(sumG / pLen, 0, 255),
+				(int)Math.Clamp(sumB / pLen, 0, 255),
+				255
+			)));
+			MaxResultHeight = Math.Max(MaxResultHeight, pLen);
+			TotalResultHeight += (ulong)pLen;
 		}
+
+		// Sort Result Colors
+
+
+
+
+
 
 		// Func
 		static int ContinueSearch (Span<Pix> allPixs, int startIndex, int delta, int left, int right) {
@@ -231,24 +235,18 @@ public readonly struct GatheringResult {
 	}
 
 
-	public void DrawResult (Rectangle uiRect) {
-		int columnCount = ResultTextures.Count;
+	public readonly void DrawResult (Rectangle uiRect) {
+		int columnCount = ResultColors.Count;
 		if (columnCount == 0) return;
-		float columnW = uiRect.Width / columnCount;
-		float columnH = uiRect.Height;
+		float currentX = uiRect.X;
 		for (int i = 0; i < columnCount; i++) {
-			var (targetHeight, texture) = ResultTextures[i];
-			Raylib.DrawTexturePro(
-				texture,
-				source: new Rectangle(0, texture.Height - targetHeight, texture.Width, targetHeight),
-				dest: new Rectangle(
-					uiRect.X + i * columnW,
-					uiRect.Y,
-					columnW, columnH
-				),
-				origin: new Vector2(),
-				0f, Color.White
+			var (pixHeight, resultColor) = ResultColors[i];
+			float uiWidth = uiRect.Width * pixHeight / TotalResultHeight;
+			Raylib.DrawRectangleRec(
+				new Rectangle(currentX, uiRect.Y, uiWidth, uiRect.Height),
+				resultColor
 			);
+			currentX += uiWidth;
 		}
 	}
 

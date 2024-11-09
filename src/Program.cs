@@ -48,11 +48,8 @@ int AlertFrame = int.MinValue;
 Color[] RequiringColors = null;
 int RequiringCountDown = 0;
 AccumulateResult CurrentAccumulateResult = default;
-GatheringResult CurrentGatheringResultA = default;
-GatheringResult CurrentGatheringResultB = default;
+GatheringResult CurrentGatheringResult = default;
 bool HasResult = false;
-bool RequireAccumulation = args.Contains(" -accumulation") || args.Contains(" -acc");
-bool RequireGathering = !args.Contains(" -no-gathering") && !args.Contains(" -ng");
 
 // Init Raylib
 Raylib.SetTraceLogLevel(TraceLogLevel.Warning);
@@ -155,13 +152,8 @@ while (!Raylib.WindowShouldClose()) {
 				RequiringCountDown--;
 				goto _END_;
 			} else {
-				if (RequireAccumulation) {
-					CurrentAccumulateResult = new AccumulateResult(RequiringColors);
-				}
-				if (RequireGathering) {
-					CurrentGatheringResultA = new GatheringResult(RequiringColors, false);
-					CurrentGatheringResultB = new GatheringResult(RequiringColors, true);
-				}
+				CurrentAccumulateResult = new AccumulateResult(RequiringColors);
+				CurrentGatheringResult = new GatheringResult(RequiringColors, GatheringResult.FilterMode.All);
 				RequiringColors = null;
 				HasResult = true;
 			}
@@ -181,23 +173,16 @@ while (!Raylib.WindowShouldClose()) {
 
 		int rWidth = Raylib.GetRenderWidth();
 		int rHeight = Raylib.GetRenderHeight();
-		int uiLeft = 0;
-		int resultCount = (RequireAccumulation ? 1 : 0) + (RequireGathering ? 1 : 0);
 
 		// Draw Accumulate Textures
-		if (RequireAccumulation) {
-			int accW = rWidth / resultCount;
-			CurrentAccumulateResult.DrawResult(new Rectangle(uiLeft, 0, accW, rHeight));
-			uiLeft += accW;
-		}
+		//CurrentAccumulateResult.DrawResult(new Rectangle(0, 0, rWidth / 2f, rHeight * 3f / 4f));
 
 		// Draw Gathering Textures 
-		if (RequireGathering) {
-			int gW = rWidth / resultCount;
-			CurrentGatheringResultA.DrawResult(new Rectangle(uiLeft, 0, gW, rHeight / 2f));
-			CurrentGatheringResultB.DrawResult(new Rectangle(uiLeft, rHeight / 2f, gW, rHeight / 2f));
-			uiLeft += gW;
-		}
+		CurrentGatheringResult.DrawResult(new Rectangle(0, rHeight * 3f / 4f, rWidth, rHeight / 4f));
+
+		// Draw Palette
+		var acc = CurrentAccumulateResult.Accumulation;
+
 
 
 
